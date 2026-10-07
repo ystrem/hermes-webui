@@ -367,3 +367,176 @@ problém: produkční kontejner naslouchá na všech iface, nejen loopback.
 | Tailscale | nenainstalováno | Bloker pro F2 |
 
 F0 hotov — surové vstupy/výstupy tvoří audit trail. F1/F2 navazují.
+
+---
+
+## F3 — egress capture (živý provoz, 2026-10-07)
+
+**Cíl:** dokázat, co WebUI skutečně odesílá za běhu — ne jen
+`grep` kódu. Kritérium: 0 spojení mimo loopback, nebo každé
+spojení pojmenované a zdůvodněné.
+
+### Metoda (náhrada za tcpdump)
+
+`tcpdump` na stroji **není nainstalován** a `sudo` chce heslo
+(neznámé). Použito, co je k dispozici:
+
+- `ss -tanp` — socket tabulka s attributem vlastního procesu
+  (per-process attribution — autoritativní důkaz)
+- `nstat -az` — TCP countery (**host-wide**, ne per-process;
+  slouží jen jako směr dat, ne jako atribuce)
+- `/proc/<pid>/net/tcp` — raw TCP tabulka netns procesu
+  (**pozor:** `/proc/PID/net/tcp` ukazuje celý network
+  namespace, ne jen proces; atribuce musí pocházet z `ss -p`)
+
+### Postup
+
+```bash
+# izolovaný state (neruší ~/.hermes), port 8899 (nesahat :8787)
+HERMES_WEBUI_HOST=127.0.0.1 HERMES_WEBUI_PORT=8899 \
+HERMES_WEBUI_STATE_DIR=<scratchpad>/f3-state \
+./start.sh --foreground
+# PID 795574, uživatel hermes (uid 1000)
+```
+
+Zátěž (browser-emulace přes curl):
+
+1. `GET /`, `/login`, `/health`
+2. `GET` všech vendored assetů (xterm, prismjs, mermaid, pdfjs)
+3. `POST /api/session/new` → session `3064048f8a90`
+4. `POST /api/chat/start` (reálný chat — model
+   `deepseek-v4.1-flash`, provider `ollama-cloud`)
+5. `GET /api/list`, `/api/file`, `/api/file/raw` (PDF preview
+   route; workspace nemá PDF → 404, route dosažen)
+
+### Baseline (před zátěží) — `ss -tanp | grep pid=795574`
+
+```
+LISTEN     0      64                              127.0.0.1:8899                      0.0.0.0:*     users:(("python3",pid=795574,fd=7))
+```
+
+**Pozorování:** na baselinu proces drží **jen** LISTEN socket
+na `127.0.0.1:8899`. Žádné odchozí spojení.
+
+### Během zátěží — `ss -tanp` (unique samples, 0.2s interval)
+
+```
+LISTEN     0      64                              127.0.0.1:8899                      0.0.0.0:*     users:(("python3",pid=795574,fd=7))
+ESTAB      0      0                               127.0.0.1:8899                    127.0.0.1:58596 users:(("python3",pid=795574,fd=6))
+ESTAB      0      0                           192.168.10.40:60536               192.168.10.90:8080 users:(("python3",pid=795574,fd=12))
+CLOSE-WAIT 1      0                           192.168.10.40:58426               192.168.10.90:8080 users:(("python3",pid=795574,fd=14))
+ESTAB      0      0                           192.168.10.40:38616                34.36.133.15:443   users:(("python3",pid=795574,fd=32))
+```
+
+### Po zátěži — finální snapshot (2026-10-07T14:00:49+02:00)
+
+```
+LISTEN     0      64                              127.0.0.1:8899                      0.0.0.0:*     users:(("python3",pid=795574,fd=7))
+ESTAB      0      0                           192.168.10.40:60536               192.168.10.90:8080 users:(("python3",pid=795574,fd=12))
+CLOSE-WAIT 1      0                           192.168.10.40:58426               192.168.10.90:8080 users:(("python3",pid=795574,fd=14))
+ESTAB      0      0                           192.168.10.40:38616                34.36.133.15:443   users:(("python3",pid=795574,fd=32))
+```
+
+### nstat -az diff (host-wide, baseline → po)
+
+```
+TcpActiveOpens       20989 → 21562   (+563)
+TcpPassiveOpens       7938 →  8107   (+169)
+TcpAttemptFails       3380 →  3473   (+93)
+TcpEstabResets        1131 →  1157   (+26)
+TcpInSegs          1904560 → 1932995
+TcpOutSegs         1918930 → 1950717
+TcpRetransSegs        9185 →  9407
+```
+
+**Poznámka:** `nstat` počítá **celý stroj** (jiné procesy,
+syncthing, docker bridge…), takže delta nelze přičíst jen
+WebUI. Autoritativní atribuce je `ss -tanp` výše.
+
+### Identifikace odchozích endpointů
+
+**`34.36.133.15:443`** — TLS cert:
+
+```
+$ curl -svk https://34.36.133.15/
+*  subject: CN=ollama.com
+*  issuer: C=US; O=Google Trust Services; CN=WR3
+* Connected to 34.36.133.15 (34.36.133.15) port 443
+```
+
+= **ollama.com API** (Google Cloud). Odpovídá konfiguraci
+výchozího modelu (`~/.hermes/config.yaml:1-5`):
+
+```yaml
+model:
+  default: deepseek-v4.1-flash
+  provider: ollama-cloud
+  base_url: https://ollama.com/v1
+  api_mode: chat_completions
+```
+
+`ollama-cloud` je Ollama provider (`api/providers.py:734`:
+`"ollama-cloud": "OLLAMA_API_KEY"`). **Volání LLM providera
+jménem agenta** — spuštěno `POST /api/chat/start`.
+
+**`192.168.10.90:8080`** — LAN endpoint (192.168.10.0/24),
+`mnemosyne_rpi` MCP server přes SSE (`~/.hermes/config.yaml:663,669-675`,
+Bearer token **vynechán z bezpečnostních důvodů**):
+
+```yaml
+mcp_servers:
+  mnemosyne_rpi:
+    url: http://192.168.10.90:8080/sse
+    headers:
+      Authorization: Bearer <REDACTED>
+    timeout: 30
+    connect_timeout: 15
+    transport: sse
+```
+
+Identita potvrzena live (autentizovaný API gateway):
+
+```
+$ curl -s http://192.168.10.90:8080/
+{"error":"missing bearer token"}
+```
+
+Spojení navázal agent runtime po `chat/start` (MCP servery
+se připojují při startu turnu, aby poskytovaly nástroje).
+
+**Proč chat/start vrátil 200, když gateway :8642 neposlouchá:**
+výchozí runtime adapter je `legacy-direct`
+(`api/runtime_adapter.py:116-120`) — agent běží in-process
+(venv `~/.hermes/hermes-agent`) a volá provider **přímo z
+procesu WebUI**. Gateway-backed cesta (`api/gateway_chat.py`
+→ `127.0.0.1:8642`) se používá jen v gateway režimu; na tomto
+stroji je `api_server` vypnutý (viz §2.2), takže přímý runtime
+je tím, co se reálně spustilo.
+
+### Interpretace (F3 závěr)
+
+| Spojení | Identita | Trigger | Verdikt |
+|---------|----------|---------|---------|
+| `127.0.0.1:8899` LISTEN + inbound `127.0.0.1:58596` | same-origin server + curl | zátěž | OK (loopback) |
+| `34.36.133.15:443` | ollama.com API (TLS CN=ollama.com) | chat/start → LLM completion (`deepseek-v4.1-flash`) | **oprávněné** — LLM provider, uživatelem konfigurovaný |
+| `192.168.10.90:8080` | `mnemosyne_rpi` MCP server (SSE, Bearer) | chat/start → MCP server attach | **oprávněné** — MCP integrace, LAN, uživatelem konfigurovaná |
+
+**0 spojení na:** CDN (`cdn.jsdelivr.net`), Google Fonts
+(`fonts.googleapis.com`/`fonts.gstatic.com`), Cloudflare
+(`cloudflareaccess.com`/`cloudflareinsights.com`), telemetry
+(sentry/posthog/…), GitHub (update check se v testovacím
+okně neaktivoval).
+
+**Kritérium F3 splněno:** každé spojení mimo loopback je
+pojmenováno a zdůvodněno — obě jsou uživatelem konfigurované
+koncové body agenta (LLM provider + MCP server), spuštěné
+na požádání chatu. WebUI framework sám o sobě nic neodesílá;
+žádná telemetrie, žádné CDN.
+
+**Důsledek pro F2 allowlist:** produkční egress allowlist
+(systemd/nftables artefakty v `deploy/`) bude muset po
+aktivaci Tailscale povolit i tyto dva typy endpointů:
+LLM provider URL (zde ollama.com:443) a konfigurované MCP
+servery (zde LAN 192.168.10.90:8080) — jinak se chat
+po zapnutí `IPAddressDeny=any` přeruší. Loopback-only
+policy stačí jen pro instalaci bez chatu/MCP.
