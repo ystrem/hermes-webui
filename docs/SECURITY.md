@@ -135,58 +135,49 @@ Produkční režim je bezpečnější, protože:
 3. Z internetu/cizí LAN port nevidí — Tailscale sám řídí firewall.
 4. Žádné runtime requesty neopouštějí server (viz §6).
 
-### 4.3 Egress allowlist (F2 cíl — připraveno, **nespuštěno**)
+### 4.3 Egress allowlist (F2 — artefakty připraveny, **nespuštěny**)
 
-Tato vrstva **nebyla aktivována** v tomto commitu. Aktivuje se **až po
-schválení majitele** v Tailscale fázi (viz korekce 2026-10-07):
+Egress allowlist je teď **reálný artefakt v repo**, ne jen text
+v docs. Oba soubory jen připravují — **neinstalují se** sami
+(viz `deploy/README.md`). Aktivace je až v Tailscale fázi po
+schválení majitele (korekce 2026-10-07: „připrav, ale
+**nespouštěj** — na LAN fázi musí být UI dosažitelné z LAN").
 
-> "Egress allowlist (F2): připrav, ale **nespouštěj** — na LAN fázi musí
-> být UI dosažitelné z LAN. Spuštění egress pravidel je až po schválení
-> majitele v Tailscale fázi."
+| Artefakt | Soubor | Co dělá | Nasazení (root, manuálně) |
+|----------|--------|---------|----------------------------|
+| A | `deploy/systemd/hermes-webui.service.d/10-egress.conf` | cgroup-scoped `IPAddressDeny=any` + `IPAddressAllow=localhost` | `sudo cp` do `/etc/systemd/system/hermes-webui.service.d/`, `daemon-reload`, `restart` |
+| B | `deploy/nftables/hermes-webui-egress.nft` | nftables `meta skuid hermes`: loopback accept, zbytek **log + drop** | `sudo nft -f deploy/nftables/hermes-webui-egress.nft` (rollback: `delete table`) |
 
-Tři kandidátní implementace (dokumentujeme, nescénujeme):
+**Požadavky:** systemd 257+ a cgroup v2 pro variantu A
+(`systemd --version | head -1`; `stat -fc %T /sys/fs/cgroup`
+→ `cgroup2fs`). Na hermes-debian podpořeno.
 
-#### Varianta A — systemd `IPAddressDeny=`/`IPAddressAllow=` (doporučeno)
+**Proč dvě vrstvy:** selhávají odlišně. `IPAddressDeny=` je
+vázáno na systemd unit a její potomky — chrání jen procesy
+spuštěné přes systemd. nftables `meta skuid` je nezávislý na
+service manageru — chrání i manuální `./start.sh`, vstup do
+kontejneru i proces mimo systemd. Dohromady pokrývají obě
+cesty; žádná z nich není aktivní.
 
-Vyžaduje systemd 257+ + cgroup v2. Příklad unit:
+**Proč zatím jen `localhost`:** jediná síťová závislost WebUI
+je Hermes gateway na `http://127.0.0.1:8642`
+(`api/gateway_chat.py:301-309`, overridování `HERMES_API_URL`).
+F0/F1 audit potvrdil, že runtime requesty jinam nejdou. V
+Tailscale fázi se přidá `IPAddressAllow=100.64.0.0/10`
+(systemd) resp. `ip daddr 100.64.0.0/10 accept` (nftables),
+aby `tailscale serve` mohl proxovat.
 
-```ini
-[Service]
-IPAddressDeny=any
-IPAddressAllow=127.0.0.0/8
-IPAddressAllow=10.0.0.0/8            # LAN (LAN test režim)
-IPAddressAllow=100.64.0.0/10         # Tailscale CGNAT
-IPAddressAllow=localhost
-```
+**Důležité:** v LAN test režimu (`HERMES_WEBUI_HOST=0.0.0.0`)
+nesmí být allowlist aktivní — UI musí být dosažitelné z LAN.
+Artefakty se instaluají až při přechodu na produkční režim.
 
-Spouští se jako root (`systemctl edit`). **Dokumentujeme, nespouštíme.**
+#### Starší varianty (historie, nahrazeny artefakty A/B)
 
-#### Varianta B — nftables
-
-```sh
-sudo nft add table inet webui_egress
-sudo nft add chain inet webui_egress output { type filter hook output priority 0 \; }
-sudo nft add rule inet webui_egress output meta skuid hermes \
-    ip daddr { 127.0.0.0/8, 100.64.0.0/10 } accept
-sudo nft add rule inet webui_egress output meta skuid hermes reject
-```
-
-Vyžaduje `/usr/sbin/nft` (root). **Dokumentujeme, nespouštíme.**
-
-#### Varianta C — network namespace
-
-```sh
-sudo ip netns add webui
-sudo ip link add veth0 type veth peer name veth1
-sudo ip link set veth1 netns webui
-sudo ip addr add 100.64.0.2/10 dev veth0
-sudo ip netns exec webui ip addr add 100.64.0.3/10 dev veth1
-sudo ip netns exec webui ip route add default via 100.64.0.2
-sudo ip netns exec webui python3 server.py
-```
-
-Složitější; vyžaduje routing tabulky a Tailscale v ns.
-**Dokumentujeme, nespouštíme.**
+Původní koncepty — Varianty A (systemd), B (nftables), C
+(network namespace) — byly sloučeny do dvou připravených
+artefaktů výše. Varianta C (netns) zůstává zamítnuta:
+vyžaduje routing tabulky a Tailscale v ns, vyšší provozní
+zátěž bez přidané ochrany proti A+B.
 
 ---
 
