@@ -9,15 +9,16 @@ def test_csp_connect_src_default_header_unchanged(monkeypatch):
     monkeypatch.delenv("HERMES_WEBUI_CSP_CONNECT_EXTRA", raising=False)
 
     policy = Handler.csp_report_only_policy()
+    # Hardened: jsdelivr removed from default connect-src (assets vendored).
     expected = (
         "connect-src 'self' http://127.0.0.1:* http://localhost:* "
         "http://ipc.localhost "
         "https://127.0.0.1:* https://localhost:* "
-        "ws://127.0.0.1:* ws://localhost:* "
-        "https://cdn.jsdelivr.net; "
+        "ws://127.0.0.1:* ws://localhost:*; "
     )
 
     assert expected in policy
+    assert "cdn.jsdelivr" not in policy
 
 
 def test_csp_connect_src_includes_valid_extra_origins(monkeypatch):
@@ -30,14 +31,15 @@ def test_csp_connect_src_includes_valid_extra_origins(monkeypatch):
 
     policy = Handler.csp_report_only_policy()
 
+    # Hardened: jsdelivr not in default; extras appended at end.
     assert (
         "connect-src 'self' http://127.0.0.1:* http://localhost:* "
         "http://ipc.localhost "
         "https://127.0.0.1:* https://localhost:* "
         "ws://127.0.0.1:* ws://localhost:* "
-        "https://cdn.jsdelivr.net "
         "https://metrics.example.com wss://events.example.com:443; "
     ) in policy
+    assert "cdn.jsdelivr" not in policy
 
 
 def test_csp_connect_src_allows_https_loopback_for_sidecars(monkeypatch):
