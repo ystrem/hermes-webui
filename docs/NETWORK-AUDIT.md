@@ -540,3 +540,89 @@ LLM provider URL (zde ollama.com:443) a konfigurované MCP
 servery (zde LAN 192.168.10.90:8080) — jinak se chat
 po zapnutí `IPAddressDeny=any` přeruší. Loopback-only
 policy stačí jen pro instalaci bez chatu/MCP.
+
+---
+
+## LAN mode verification — dva režimy (živě, 2026-10-07)
+
+Ověření obou provozních režimů na portu **8899**
+(běžící `hermes-dashboard.service` na :8787 nedotčen).
+Stavový adresář izolován mimo `~/.hermes`
+(`HERMES_WEBUI_STATE_DIR=<scratchpad>/f3-state`).
+
+### Režim 1 — LAN (`HERMES_WEBUI_HOST=0.0.0.0`) + heslo
+
+```
+$ HERMES_WEBUI_HOST=0.0.0.0 HERMES_WEBUI_PORT=8899 \
+  HERMES_WEBUI_PASSWORD=testheslo-f3 ./start.sh --foreground
+[bootstrap] Starting Hermes Web UI on http://0.0.0.0:8899
+```
+
+Bind:
+
+```
+$ ss -tlnp | grep 8899
+LISTEN 0      64           0.0.0.0:8899       0.0.0.0:*    users:(("python3",pid=889663,fd=7))
+```
+
+LAN dosazitelnost (kritérium zadání):
+
+```
+$ curl -s -o /dev/null -w "%{http_code}" http://192.168.10.40:8899/login
+200
+$ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8899/login
+200
+```
+
+Auth gate (heslo opravdu chrání):
+
+```
+GET  /api/session  (bez cookie)      -> 401
+GET  /api/list     (bez cookie)      -> 401
+POST /api/auth/login (špatné heslo)  -> 401
+POST /api/auth/login (správné heslo) -> 200  {"ok": true}
+```
+
+### Režim 1b — LAN (`0.0.0.0`) BEZ hesla (varování, ne odmítnutí)
+
+```
+$ HERMES_WEBUI_HOST=0.0.0.0 HERMES_WEBUI_PORT=8899 ./start.sh --foreground
+...
+[!!] WARNING: Binding to 0.0.0.0 with NO PASSWORD SET.
+     Anyone on the network can access your filesystem and agent.
+     Set a password via Settings or HERMES_WEBUI_PASSWORD env var.
+     To suppress: bind to 127.0.0.1 or set a password.
+...
+  Hermes Web UI listening on http://0.0.0.0:8899
+```
+
+```
+$ ss -tlnp | grep 8899
+LISTEN 0      64           0.0.0.0:8899       0.0.0.0:*    users:(("python3",pid=902502,fd=7))
+```
+
+**Chování doloženo:** server při non-loopback bindu bez
+hesla **varuje, ale neodmítne** (`server.py:611-619`) —
+bind provede a servíruje (`/login` → 200). Varování je
+jediná ochrana; odtud povinnost hesla v dokumentaci
+(`NETWORK.md` §4, `SECURITY.md` §2.2).
+
+### Režim 2 — loopback (`HERMES_WEBUI_HOST=127.0.0.1`)
+
+```
+$ HERMES_WEBUI_HOST=127.0.0.1 HERMES_WEBUI_PORT=8899 ./start.sh --foreground
+[bootstrap] Starting Hermes Web UI on http://127.0.0.1:8899
+```
+
+```
+$ ss -tlnp | grep 8899
+LISTEN 0      64         127.0.0.1:8899       0.0.0.0:*    users:(("python3",pid=912094,fd=7))
+$ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8899/login
+200
+$ curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://192.168.10.40:8899/login
+000     (LAN IP nedosáhnuto — loopback-only bind, jak má být)
+```
+
+**Ověřeno:** loopback režim po LAN testu funguje dál;
+v LAN režimu je UI dosažitelné z LAN jen s heslem.
+Testovací server na :8899 po testu ukončen (port uvolněn).
