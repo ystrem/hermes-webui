@@ -70,6 +70,34 @@ def _gateway_base_url(config_data=None, environ: dict[str, str] | None = None) -
 běžícího `api_server` WebUI naběhne, ale chat selže. Toto je reálný
 bloker dneška.
 
+**Jak zapnout `api_server` (návod — NEZAPÍNÁME sami):**
+
+Zapíná se v konfiguraci Hermes agenta, ne v WebUI. Postup
+podle user-guide: `website/docs/user-guide/features/api-server.md`
+(Hermes dokumentace — není v tomto repo):
+
+1. Otevřít `~/.hermes/config.yaml`
+2. V sekci `platforms:` přidat/aktivovat `api_server`
+   (defaultní port `8642`):
+   ```yaml
+   platforms:
+     api_server:
+       enabled: true
+   ```
+3. Restartovat Hermes gateway/agent službu
+4. Ověřit: `ss -tlnp | grep 8642` → `LISTEN ... 127.0.0.1:8642`
+
+**Nesmíme to zapnout sami** — je to změna běžícího Hermes
+configu (`~/.hermes/config.yaml`), mimo scope tohoto
+hardeningu (viz §2.3 „Co **nezapínáme** sami"). Na tomto
+stroji je `api_server` v `platforms:` přítomen pouze jako
+implicitní disabled (v `config.yaml` není uveden). Po
+zapnutí majitelem chat používá gateway-backed cestu
+(`api/gateway_chat.py` → `127.0.0.1:8642`); do té doby
+WebUI padne na přímý in-process runtime (viz
+`NETWORK-AUDIT.md` F3 — pozor: ten volá LLM providera
+přímo z procesu WebUI).
+
 ### 2.2 Co reálně poslouchá (ověřeno 2026-10-07, hermes-debian)
 
 `ss -tlnp` (zkráceno na relevantní řádky):
