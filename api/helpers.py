@@ -209,18 +209,18 @@ _CSP_EXTRA_IMG_RE = _re.compile(
 )
 _CSP_HEADER_NAME = 'Content-Security-Policy'
 _CSP_SHARED_POLICY_TEMPLATE = (
-    "default-src 'self' https://*.cloudflareaccess.com; "
+    "default-src 'self'; "
     "object-src 'none'; "
     "frame-ancestors 'none'; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com blob:; "
-    "worker-src blob: 'self' https://cdn.jsdelivr.net; "
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "script-src 'self' 'unsafe-inline' blob:; "
+    "worker-src blob: 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
     "img-src {img_src}; "
-    "font-src 'self' data: https://fonts.gstatic.com; "
+    "font-src 'self' data:; "
     "media-src 'self' data: blob:; "
     "connect-src {connect_src}; "
     "frame-src {frame_src}; "
-    "manifest-src 'self' https://*.cloudflareaccess.com; "
+    "manifest-src 'self'; "
     "base-uri 'self'; form-action 'self'"
 )
 # Base img-src: same-origin files, inline data: URIs (how the renderer embeds
@@ -332,7 +332,7 @@ def csp_img_extra_sources(extra_img_src: str | None = None) -> list[str]:
 
 
 def _csp_connect_src(extra_connect_src: str = "") -> str:
-    return f"{_CSP_CONNECT_BASE} https://cdn.jsdelivr.net{extra_connect_src}"
+    return f"{_CSP_CONNECT_BASE}{extra_connect_src}"
 
 
 def _csp_frame_src(extra_frame_src: str = "") -> str:
