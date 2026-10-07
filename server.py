@@ -601,6 +601,13 @@ def main() -> None:
     if within_container:
         print('[ok] Running within container.', flush=True)
 
+    # Hardened varianta: bind adresa zustava konfigurovatelna (HERMES_WEBUI_HOST
+    # nebo --host). Hardened varianta NEzavadi gate "HERMES_WEBUI_ALLOW_PUBLIC_BIND"
+    # — bind omezujeme heslem (viz vars povinne pri 0.0.0.0 nize), ne env switchem.
+    # Oba rezimy (LAN test 0.0.0.0 + heslo / produkce 127.0.0.1 + tailscale serve)
+    # viz docs/NETWORK.md §1, §3.
+    # Puvodni ochrana "warn non-loopback bez auth" nize zustava v platnosti.
+
     # Security: warn if binding non-loopback without authentication
     from api.auth import get_oidc_startup_warning, is_auth_enabled
     if HOST not in ('127.0.0.1', '::1', 'localhost') and not is_auth_enabled():

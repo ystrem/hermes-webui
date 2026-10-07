@@ -471,6 +471,11 @@ def open_browser(url: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bootstrap Hermes Web UI onboarding.")
     parser.add_argument("port", nargs="?", type=int, default=DEFAULT_PORT)
+    # Bind adresa je plne v rukou operatora pres HERMES_WEBUI_HOST / --host.
+    # Hardened varianta NEzavadi gate (zadny "HERMES_WEBUI_ALLOW_PUBLIC_BIND" v kodu
+    # neexistuje) — bind omezujeme heslem v server.py, ne env switchem. Bez
+    # hesla pri non-loopback bind server.py vypise warning. Viz docs/NETWORK.md
+    # §1 (dva rezimy), §3 (env kontrakt).
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument(
         "--no-browser",
