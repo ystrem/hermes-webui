@@ -1,0 +1,59 @@
+# Egress allowlist (nftables) for Hermes WebUI — F2 hardening
+#
+# Branch: hardening/no-telemetry (ystrem/hermes-webui)
+# Status: DOCUMENTATION ONLY — DO NOT RUN from this repo. Applying
+# requires root (sudo), which this environment deliberately lacks.
+# Activation is deferred to the Tailscale phase (owner approval) —
+# see docs/SECURITY.md §4.3.
+#
+# HOW TO APPLY (root, run by operator — not automated here):
+#   sudo nft -c -f deploy/nftables/hermes-webui-egress.nft   # syntax check
+#   sudo nft -f deploy/nftables/hermes-webui-egress.nft        # apply
+#   sudo nft list table inet hermes_webui_egress               # verify
+#   journalctl -k -f | grep webui-egress-deny                  # watch denials
+#   sudo nft delete table inet hermes_webui_egress             # rollback
+#
+# SCOPE: rules match only sockets owned by uid "hermes" (the WebUI
+# service user, uid 1000 on hermes-debian). All other host traffic
+# is untouched (chain policy accept).
+#
+# POLICY: loopback is allowed; every OTHER egress packet from uid
+# hermes is LOGGED and then dropped. We never drop without logging —
+# the kernel log is how operators see exactly what tried to leave
+# the box (and whether it was a misconfigured LLM provider URL, a
+# forgotten integration, or an actual compromise).
+#
+# WHY LOOPBACK IS ENOUGH TODAY: WebUI's only network dependency is
+# the Hermes gateway at http://127.0.0.1:8642
+# (api/gateway_chat.py:301-309, overridable via HERMES_API_URL).
+# No runtime CDN/telemetry requests exist (F0/F1 audit).
+#
+# TAILSCALE PHASE (uncomment when tailscale is installed):
+#   meta skuid hermes ip daddr 100.64.0.0/10 accept
+#
+# WHY TWO LAYERS with the systemd drop-in
+# (deploy/systemd/hermes-webui.service.d/10-egress.conf):
+#   - systemd IPAddressDeny=any is cgroup-scoped: it follows the
+#     service unit and all its children, but only protects processes
+#     actually launched through systemd.
+#   - nftables meta skuid is service-manager-independent: it also
+#     covers a manual ./start.sh run, a container entrypoint, or a
+#     stray process started outside systemd.
+#   The two layers fail differently; together they close both gaps.
+#   Neither is active yet — both are prepared artifacts awaiting the
+#   Tailscale phase.
+
+table inet hermes_webui_egress {
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        # Loopback: gateway on 127.0.0.1:8642, local API, IPC — allowed.
+        meta skuid hermes oifname "lo" accept
+        meta skuid hermes ip daddr 127.0.0.0/8 accept
+        meta skuid hermes ip6 daddr ::1 accept
+
+        # Anything else from uid hermes: LOG then DROP (never silent).
+        meta skuid hermes log prefix "webui-egress-deny: " flags all level info
+        meta skuid hermes drop
+    }
+}

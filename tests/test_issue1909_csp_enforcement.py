@@ -39,18 +39,25 @@ def test_security_helper_sends_enforcing_csp_with_hardening_directives(monkeypat
     headers = _headers_from_security_helper()
 
     policy = headers["Content-Security-Policy"]
-    assert "default-src 'self' https://*.cloudflareaccess.com" in policy
+    assert "default-src 'self'" in policy
     assert "base-uri 'self'" in policy
     assert "form-action 'self'" in policy
-    assert "manifest-src 'self' https://*.cloudflareaccess.com" in policy
-    assert "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com blob:" in policy
-    assert "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com" in policy
-    assert "worker-src blob: 'self' https://cdn.jsdelivr.net" in policy
-    assert "font-src 'self' data: https://fonts.gstatic.com" in policy
+    assert "manifest-src 'self'" in policy
+    # Hardened: no cdn.jsdelivr, no cloudflareinsights, no googleapis/gstatic.
+    assert "script-src 'self' 'unsafe-inline' blob:" in policy
+    assert "https://cdn.jsdelivr.net" not in policy
+    assert "https://static.cloudflareinsights.com" not in policy
+    assert "https://fonts.googleapis.com" not in policy
+    assert "https://fonts.gstatic.com" not in policy
+    assert "style-src 'self' 'unsafe-inline';" in policy
+    assert "worker-src blob: 'self';" in policy
+    assert "font-src 'self' data:;" in policy
     assert "object-src 'none'" in policy
     assert "frame-ancestors 'none'" in policy
     assert "media-src 'self' data: blob:" in policy
-    assert "connect-src 'self' http://127.0.0.1:* http://localhost:* http://ipc.localhost https://127.0.0.1:* https://localhost:* ws://127.0.0.1:* ws://localhost:* https://cdn.jsdelivr.net" in policy
+    # connect-src still allows loopback variants + extra (without jsdelivr).
+    assert "connect-src 'self' http://127.0.0.1:* http://localhost:* http://ipc.localhost https://127.0.0.1:* https://localhost:* ws://127.0.0.1:* ws://localhost:*" in policy
+    assert "https://cdn.jsdelivr.net" not in policy
 
 
 def test_enforcing_csp_honors_valid_extra_connect_origins(monkeypatch):
@@ -65,7 +72,7 @@ def test_enforcing_csp_honors_valid_extra_connect_origins(monkeypatch):
     assert (
         "connect-src 'self' http://127.0.0.1:* http://localhost:* "
         "http://ipc.localhost https://127.0.0.1:* https://localhost:* "
-        "ws://127.0.0.1:* ws://localhost:* https://cdn.jsdelivr.net "
+        "ws://127.0.0.1:* ws://localhost:* "
         "https://metrics.example.com wss://events.example.com:443; "
     ) in policy
 

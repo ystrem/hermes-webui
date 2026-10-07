@@ -21394,8 +21394,8 @@ function loadPdfInline(container){
       loadPdf(window._pdfjsLib);
     } else if(!_pdfjsLoading){
       _pdfjsLoading=true;
-      const _pdfSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.min.mjs';
-      const _pdfWorker='https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.worker.min.mjs';
+      const _pdfSrc='static/vendor/pdfjs-dist/4.9.155/pdf.min.mjs';
+      const _pdfWorker='static/vendor/pdfjs-dist/4.9.155/pdf.worker.min.mjs';
       const _pdfBlob=new Blob([`import*as p from'${_pdfSrc}';p.GlobalWorkerOptions.workerSrc='${_pdfWorker}';window._pdfjsLib=p;window._pdfjsReady=true;window.dispatchEvent(new Event('pdfjs-ready'));`],{type:'application/javascript'});
       const s=document.createElement('script');
       s.type='module';
@@ -21453,8 +21453,8 @@ function renderMermaidBlocks(container){
     if(!_mermaidLoading){
       _mermaidLoading=true;
       const script=document.createElement('script');
-      script.src='https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js';
-      script.integrity='sha384-R63zfMfSwJF4xCR11wXii+QUsbiBIdiDzDbtxia72oGWfkT7WHJfmD/I/eeHPJyT';
+      script.src='static/vendor/mermaid/10.9.3/mermaid.min.js';
+      // SRI removed — vendored asset, version pinned in path.
       script.crossOrigin='anonymous';
       script.onload=()=>{
         if(typeof mermaid!=='undefined'){

@@ -84,3 +84,6 @@ docs/ui-ux/review-shots/
 # Local WebUI runtime data and credentials
 .webui_password
 attachments/
+
+# Agent task briefs — working material, never repo content
+.cmd-tasks/
